@@ -38,8 +38,9 @@ SIMPLE_JWT = {
     'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
 }
 
-RAZORPAY_KEY_ID = "rzp_live_T7MmzsHaYrbhIE" 
-RAZORPAY_KEY_SECRET = "cuP2UUdNZ9YRO2lzjMIZcl1w"
+
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
 
 razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
