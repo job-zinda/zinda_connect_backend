@@ -30,7 +30,11 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-q+fine(y(m9jbr14$6#wj05^qe
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = ['*'] if DEBUG else []
+_allowed_hosts_env = os.getenv('ALLOWED_HOSTS')
+if _allowed_hosts_env:
+    ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_env.split(',')]
+else:
+    ALLOWED_HOSTS = ['*'] if DEBUG else []
 
 # JWT Settings
 SIMPLE_JWT = {
@@ -183,5 +187,6 @@ USE_TZ = True
 
 # Static files
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
