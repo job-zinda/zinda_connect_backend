@@ -60,9 +60,11 @@ DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=config('EMAIL_HOST_USE
 
 # CORS Settings
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173", 
+    "http://localhost:5173",
     "http://localhost:3000",
-    "https://zinda-connect-frontend.vercel.app",  
+    "https://zinda-connect-frontend.vercel.app",
+    "https://zindaconnect.com",
+    "https://www.zindaconnect.com",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
