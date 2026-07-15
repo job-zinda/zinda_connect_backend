@@ -8,12 +8,13 @@ from datetime import date
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.exceptions import InvalidToken
 
 from .models import (
     AdminProfile, NotificationSettings, Profile, Advertisement, ProfileImage, 
-    BlockedUser, UserPreferences, SupportMessage, NotificationSetting, 
+    BlockedUser, UserPreferences, SupportMessage,  
     UserSubscription, ReportedProblem, ProfileLike, FavouriteProfile, 
-    Notification, Comment, Message, AdminSettings, ChatRoom, AadhaarVerification,SuccessStory, SubscriptionPlan, Payment
+    Notification, Comment, Message, ChatRoom, AadhaarVerification,SuccessStory, SubscriptionPlan, Payment
 )
 
 User = get_user_model()
@@ -24,7 +25,7 @@ class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
     confirm_password = serializers.CharField(write_only=True)
     referral_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    phone = serializers.CharField(required=True, max_length=15) # ✅ Phone add ചെയ്തു
+    phone = serializers.CharField(required=True, max_length=15) 
 
     class Meta:
         model = User
@@ -37,7 +38,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         return email_lower
 
     def validate_phone(self, value):
-        # ✅ Phone validation - digits only
+        
         if not value.isdigit():
             raise serializers.ValidationError("Phone number must contain only digits")
         if len(value) < 10:
@@ -57,35 +58,27 @@ class RegisterSerializer(serializers.ModelSerializer):
             email=validated_data['email'],
             name=validated_data['name'],
             password=validated_data['password'],
-            phone=validated_data['phone'], # ✅ Phone save ചെയ്യുന്നു
+            phone=validated_data['phone'], 
             referral_id=referral_id if referral_id else None
         )
         return user
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    username_field = 'email'
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields.pop('username', None)
-        self.fields['email'] = serializers.EmailField(required=True)
+    username_field = "email"
 
     def validate(self, attrs):
-        email = attrs.get('email', '').lower()
-        attrs['email'] = email
-        data = super().validate(attrs)
-        data['user_id'] = self.user.id
-        data['email'] = self.user.email
-        data['profile_type'] = self.user.profile_type
-        data['referral_id'] = self.user.referral_id
+        print("ATTRS:", attrs)
 
-        if self.user.is_staff:
-            data['role'] = 'admin'
-        else:
-            data['role'] = 'user'
+        try:
+            data = super().validate(attrs)
+            print("SUCCESS")
+        except Exception as e:
+            print("ERROR:", repr(e))
+            raise
+
+        data["role"] = "admin" if self.user.is_superuser else "user"
         return data
-
 
 class UpdateProfileTypeSerializer(serializers.ModelSerializer):
     class Meta:
@@ -116,7 +109,7 @@ class ProfileSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return None
 
-        if obj.user == request.user:
+        if request.user.is_staff or request.user.is_superuser or obj.user == request.user:
             if obj.profile_picture and hasattr(obj.profile_picture, 'url'):
                 return request.build_absolute_uri(obj.profile_picture.url)
             return None
@@ -145,7 +138,8 @@ class ProfileSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return []
 
-        if obj.user == request.user:
+       
+        if request.user.is_staff or request.user.is_superuser or obj.user == request.user:
             images = ProfileImage.objects.filter(profile=obj)
             return [{
                 'id': img.id,
@@ -184,7 +178,7 @@ class ProfileSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return None
 
-        if obj.user == request.user:
+        if request.user.is_staff or request.user.is_superuser or obj.user == request.user:
             return obj.user.email if obj.user else None
 
         try:
@@ -209,7 +203,9 @@ class ProfileSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return None
 
-        if obj.user == request.user:
+        if request.user.is_staff or request.user.is_superuser or obj.user == request.user:
+            if obj.phone_number:
+                return obj.phone_number
             return obj.user.phone if obj.user and obj.user.phone else None
 
         try:
@@ -227,6 +223,8 @@ class ProfileSerializer(serializers.ModelSerializer):
         except UserPreferences.DoesNotExist:
             pass
 
+        if obj.phone_number:
+            return obj.phone_number
         return obj.user.phone if obj.user and obj.user.phone else None
 
     def get_user(self, obj):
@@ -264,16 +262,13 @@ class ProfileSerializer(serializers.ModelSerializer):
 
     def get_is_verified(self, obj):
         """✅ FIXED: Payment success OR Premium active"""
-        # Check 1: Aadhaar verified
         aadhar_verified = obj.verification_status == 'verified'
         
-        # Check 2: Has successful payment
         has_payment = Payment.objects.filter(
             user=obj.user,
             status__in=['completed', 'success']
         ).exists()
         
-        # Check 3: Premium active
         premium_active = False
         try:
             if hasattr(obj.user, 'subscription'):
@@ -284,7 +279,6 @@ class ProfileSerializer(serializers.ModelSerializer):
         
         print(f"DEBUG {obj.full_name}: Aadhar={aadhar_verified}, Payment={has_payment}, Premium={premium_active}")
         
-        # ✅ OR condition: Payment OR Premium OR Aadhar
         return has_payment or premium_active or aadhar_verified
 
 
@@ -369,7 +363,7 @@ class AdvertisementSerializer(serializers.ModelSerializer):
     class Meta:
         model = Advertisement
         fields = ['id', 'title', 'file', 'file_url', 'file_type', 'link_url', 'is_active', 'created_at']
-        read_only_fields = ['file_type', 'file_url']
+        read_only_fields = ['file_url', 'file_type'] 
 
     def get_file_url(self, obj):
         request = self.context.get('request')
@@ -379,7 +373,6 @@ class AdvertisementSerializer(serializers.ModelSerializer):
             return obj.file.url
         return None
 
-    
 # ==================== PROFILE UPDATE (SETTINGS) SERIALIZER ====================
 
 class SettingsProfileUpdateSerializer(serializers.ModelSerializer):
@@ -421,13 +414,14 @@ class SettingsProfileUpdateSerializer(serializers.ModelSerializer):
         }
 
     def to_internal_value(self, data):
-        data = data.copy()
+     
         ret = super().to_internal_value(data)
 
-        for field_name, value in list(ret.items()):
+        for field_name in list(ret.keys()):
             if field_name == 'profile_picture':
                 continue
-            if value in ['', 'null', 'undefined']:
+            value = ret[field_name]
+            if value in ['', 'null', 'None', 'undefined']:
                 ret[field_name] = None
             elif isinstance(value, str):
                 ret[field_name] = value.strip() or None
@@ -512,7 +506,7 @@ class SupportMessageSerializer(serializers.ModelSerializer):
 
 class NotificationSettingSerializer(serializers.ModelSerializer):
     class Meta:
-        model = NotificationSetting
+        model = NotificationSettings
         exclude = ['user']
 
 class UserSubscriptionSerializer(serializers.ModelSerializer):
@@ -631,25 +625,29 @@ class ChatRoomSerializer(serializers.ModelSerializer):
         fields = ['id', 'other_user', 'last_message', 'unread_count', 'status', 'initiated_by', 'is_admin_chat', 'last_message_type']
 
     def get_other_user(self, obj):
-        user = self.context['request'].user
+        request = self.context.get('request')
+        user = request.user
         other = obj.user2 if obj.user1 == user else obj.user1
         
         image_url = None
         profile = getattr(other, 'profile', None)
         admin_profile = getattr(other, 'admin_profile', None)
         
-        if profile and profile.profile_picture:
+        if profile and getattr(profile, 'profile_picture', None):
             image_url = profile.profile_picture.url
-        elif admin_profile and admin_profile.profile_picture:
+        elif admin_profile and hasattr(admin_profile, 'profile_picture') and admin_profile.profile_picture:
             image_url = admin_profile.profile_picture.url
+           
+        if image_url and request:
+            image_url = request.build_absolute_uri(image_url)
         
         first_name = other.first_name or ""
         last_name = other.last_name or ""
         full_name = f"{first_name} {last_name}".strip()
         
-        if profile and profile.full_name:
+        if profile and getattr(profile, 'full_name', None):
             full_name = profile.full_name
-        elif admin_profile and admin_profile.full_name:
+        elif admin_profile and hasattr(admin_profile, 'full_name') and admin_profile.full_name:
             full_name = admin_profile.full_name
         
         if not full_name:
@@ -667,7 +665,6 @@ class ChatRoomSerializer(serializers.ModelSerializer):
         }
 
     def get_last_message(self, obj):
-        
         msg = obj.messages.filter(is_deleted_for_everyone=False).order_by('-created_at').first()
         if not msg: return None
         return {
@@ -707,12 +704,15 @@ class MessageSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
     reply_to_text = serializers.SerializerMethodField()
     reply_to_sender_name = serializers.SerializerMethodField()
+    is_admin = serializers.SerializerMethodField() 
+    is_me = serializers.SerializerMethodField() 
 
     class Meta:
         model = Message
         fields = ['id', 'text', 'message_type', 'voice_url', 'image_url',
                   'is_read', 'created_at', 'sender_name', 'sender_full_name', 'sender',
-                  'reply_to', 'reply_to_text', 'reply_to_sender_name', 'is_deleted_for_everyone']
+                  'reply_to', 'reply_to_text', 'reply_to_sender_name', 'is_deleted_for_everyone',
+                  'is_admin', 'is_me'] 
 
     def get_sender_name(self, obj):
         profile = getattr(obj.sender, 'profile', None)
@@ -758,6 +758,13 @@ class MessageSerializer(serializers.ModelSerializer):
             return obj.reply_to.sender.username
         return None
 
+    def get_is_admin(self, obj): 
+        return obj.sender.is_staff or obj.sender.is_superuser
+
+    def get_is_me(self, obj): 
+        request = self.context.get('request')
+        return obj.sender.id == request.user.id
+
 # ==================== ADMIN PANEL SERIALIZERS ====================
 
 class AdminCreateUserSerializer(serializers.Serializer):
@@ -789,14 +796,10 @@ class AdminUserListSerializer(serializers.ModelSerializer):
 
 
 class AdminProfileSerializer(serializers.ModelSerializer):
-    
     email = serializers.EmailField(source='user.email', read_only=True)
     username = serializers.CharField(source='user.username', read_only=True)
-    profile_image = serializers.ImageField(source='profile_picture', required=False, allow_null=True, use_url=True)
     profile_image_url = serializers.SerializerMethodField()
     
-    gender = serializers.CharField(required=False, allow_null=True, allow_blank=True)
-
     class Meta:
         model = AdminProfile
         fields = [
@@ -807,14 +810,11 @@ class AdminProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'role', 'email', 'username']
 
     def get_profile_image_url(self, obj):
-        if obj.profile_picture and hasattr(obj.profile_picture, 'url') and obj.profile_picture.name:
+        if obj.profile_image and hasattr(obj.profile_image, 'url') and obj.profile_image.name:
             request = self.context.get('request')
-            try:
-                if request:
-                    return request.build_absolute_uri(obj.profile_picture.url)
-                return obj.profile_picture.url
-            except ValueError:
-                return None
+            if request:
+                return request.build_absolute_uri(obj.profile_image.url)
+            return obj.profile_image.url
         return None
 
     def validate_gender(self, value):
@@ -824,17 +824,7 @@ class AdminProfileSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError('Gender must be "Male" or "Female"')
             return clean_value
         return None
-
-    def update(self, instance, validated_data):
-        if 'profile_picture' in validated_data:
-            new_image = validated_data.get('profile_picture')
-            if instance.profile_picture and new_image:
-                instance.profile_picture.delete(save=False)
-            elif new_image is None and instance.profile_picture:
-                instance.profile_picture.delete(save=False)
-
-        return super().update(instance, validated_data)
-    
+        
 class AadhaarVerificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = AadhaarVerification
@@ -852,7 +842,7 @@ class AdminProfileListSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(source='user.email', read_only=True)
     username = serializers.CharField(source='user.username', read_only=True)
     user_id = serializers.IntegerField(source='user.id', read_only=True)
-    phone = serializers.CharField(source='user.phone', read_only=True) # ✅ Phone add ചെയ്തു
+    phone = serializers.CharField(source='user.phone', read_only=True) 
     profile_picture = serializers.SerializerMethodField()
     has_aadhaar = serializers.SerializerMethodField()
     aadhaar_status = serializers.SerializerMethodField()
@@ -860,7 +850,7 @@ class AdminProfileListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Profile
         fields = [
-            'id', 'user_id', 'email', 'username', 'phone', # ✅ phone added
+            'id', 'user_id', 'email', 'username', 'phone', 
             'full_name', 'profile_picture', 'gender', 'height', 'date_of_birth', 
             'religion', 'district', 'city', 'state', 'country', 
             'occupation', 'verification_status', 'rejection_reason',
@@ -887,35 +877,29 @@ class AdminProfileListSerializer(serializers.ModelSerializer):
 class AdminProfileDetailSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(source='user.email', read_only=True)
     username = serializers.CharField(source='user.username', read_only=True)
-    profile_image = serializers.ImageField(required=False, allow_null=True, use_url=True)
+    profile_image = serializers.ImageField(required=False, allow_null=True)
     profile_image_url = serializers.SerializerMethodField()
 
     class Meta:
-        model = AdminSettings
+        model = AdminProfile 
         fields = [
-            'id', 'full_name', 'email', 'username', 'phone_number', 'role',
+            'id', 'full_name', 'email', 'username', 'phone', 'role', 
             'date_of_birth', 'gender', 'location', 'language', 'bio',
             'profile_image', 'profile_image_url'
         ]
         read_only_fields = ['id', 'role', 'email', 'username']
 
     def get_profile_image_url(self, obj):
-        if obj.profile_image and hasattr(obj.profile_image, 'url') and obj.profile_image.name:
-            request = self.context.get('request')
-            try:
-                if request:
-                    return request.build_absolute_uri(obj.profile_image.url)
-                return obj.profile_image.url
-            except ValueError:
-                return None
+        request = self.context.get('request')
+        if obj.profile_image:
+            return request.build_absolute_uri(obj.profile_image.url) if request else obj.profile_image.url
         return None
 
     def validate_gender(self, value):
         if value:
-            
-            value = str(value).strip().strip('"').strip("'").lower()
+            value = str(value).strip().lower()
             if value not in ['male', 'female']:
-                raise serializers.ValidationError('"male" or "female" മാത്രമേ അനുവദിക്കൂ')
+                raise serializers.ValidationError('Gender must be "male" or "female"')
         return value
 
     def update(self, instance, validated_data):
@@ -923,34 +907,29 @@ class AdminProfileDetailSerializer(serializers.ModelSerializer):
             new_image = validated_data.get('profile_image')
             if instance.profile_image and new_image:
                 instance.profile_image.delete(save=False)
-            elif new_image is None and instance.profile_image:
-                instance.profile_image.delete(save=False)
-
         return super().update(instance, validated_data)
     
 class SuccessStorySerializer(serializers.ModelSerializer):
-    image_one = serializers.SerializerMethodField()
-    image_two = serializers.SerializerMethodField()
+    image_one = serializers.ImageField(required=False, allow_null=True) 
+    image_two = serializers.ImageField(required=False, allow_null=True) 
 
     class Meta:
         model = SuccessStory
         fields = ['id', 'partner_one_name', 'partner_two_name', 'marriage_date',
                   'location', 'story_text', 'image_one', 'image_two', 'created_at']
 
-    def get_image_one(self, obj):
+    
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
         request = self.context.get('request')
-        if obj.image_one and hasattr(obj.image_one, 'url'):
-            return request.build_absolute_uri(obj.image_one.url) if request else obj.image_one.url
-        return None
-
-    def get_image_two(self, obj):
-        request = self.context.get('request')
-        if obj.image_two and hasattr(obj.image_two, 'url'):
-            return request.build_absolute_uri(obj.image_two.url) if request else obj.image_two.url
-        return None
+        if instance.image_one:
+            rep['image_one'] = request.build_absolute_uri(instance.image_one.url) if request else instance.image_one.url
+        if instance.image_two:
+            rep['image_two'] = request.build_absolute_uri(instance.image_two.url) if request else instance.image_two.url
+        return rep
 
 class SubscriptionPlanSerializer(serializers.ModelSerializer):
-    # ✅ FIX: write_only remove ചെയ്തു. GET-ലും POST-ലും work ആകും
+   
     price = serializers.CharField(required=True)
     duration_months = serializers.CharField(required=True)
     features = serializers.ListField(
@@ -979,7 +958,7 @@ class SubscriptionPlanSerializer(serializers.ModelSerializer):
             duration_clean = re.sub(r'[^\d]', '', duration_str)
             data['duration_months'] = int(duration_clean) if duration_clean else 1
 
-        # "profile views, contact views" → ["profile views", "contact views"]
+       
         if 'features' in data and isinstance(data['features'], str):
             data['features'] = [f.strip() for f in data['features'].split(',') if f.strip()]
 

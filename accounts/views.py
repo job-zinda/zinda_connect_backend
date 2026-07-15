@@ -8,7 +8,7 @@ import razorpay
 
 from datetime import date, timedelta, timezone
 from django.db.models.functions import TruncDate
-from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, get_user_model
 from django.core.cache import cache
 from django.core.mail import send_mail
 from django.conf import settings
@@ -31,15 +31,12 @@ from rest_framework_simplejwt.tokens import RefreshToken
 razorpay_client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
 logger = logging.getLogger(__name__)
 
-# മോഡലുകൾ
 from .models import (
     AdminPaymentMethod, AdminProfile, BlockedUser, NotificationSettings, ProfileLike, UserPreferences, SupportMessage,
-    NotificationSetting, UserSubscription, ReportedProblem,
+     UserSubscription, ReportedProblem,
     Profile, ProfileImage, Advertisement, FavouriteProfile,
-    Notification, Comment, ChatRoom, Message, AadhaarVerification, AdminSettings,SuccessStory, SubscriptionPlan, Payment,
+    Notification, Comment, ChatRoom, Message, AadhaarVerification,SuccessStory, SubscriptionPlan, Payment,
 )
-
-# സീരിയലൈസറുകൾ (എല്ലാ പേരുകളും ഫ്രണ്ടെൻഡുമായി 100% മാച്ച് ആകുന്നത്)
 from .serializers import (
     AdminCreateUserSerializer, AdminProfileDetailSerializer, AdminProfileListSerializer, AdminUserListSerializer, 
     BlockedUserSerializer, NotificationSettingsSerializer, UserPreferencesSerializer, SupportMessageSerializer,
@@ -57,7 +54,7 @@ User = get_user_model()
 
 # ==================== AUTH & LOGIN VIEWS ====================
 
-class LoginView(TokenObtainPairView):
+class LoginView(TokenObtainPairView): 
     serializer_class = CustomTokenObtainPairSerializer
 
 class RegisterView(APIView):
@@ -320,7 +317,7 @@ class AdvertisementView(APIView):
         
         serializer = AdvertisementSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
-            serializer.save()
+            serializer.save()  
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -335,7 +332,7 @@ class AdvertisementView(APIView):
 
         serializer = AdvertisementSerializer(ad, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
-            serializer.save()
+            serializer.save() 
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -367,7 +364,8 @@ class UpdateProfileView(APIView):
         serializer = ProfileSerializer(profile, context={'request': request})
         data = serializer.data
         data["email"] = user.email
-        data["phone"] = user.phone if user.phone else ""
+        
+        data["phone"] = user.phone if user.phone else (profile.phone_number if profile.phone_number else "")
         return Response(data, status=status.HTTP_200_OK)
 
     def patch(self, request):
@@ -381,9 +379,13 @@ class UpdateProfileView(APIView):
 
         if "phone" in data:
             new_phone = data.get("phone").strip() if data.get("phone") else None
-            if new_phone and User.objects.filter(phone=new_phone).exclude(id=user.id).exists():
-                return Response({"phone": ["This phone number is already used by another account"]}, status=status.HTTP_400_BAD_REQUEST)
-            user.phone = new_phone
+            if new_phone:
+                
+                if User.objects.filter(phone=new_phone).exclude(id=user.id).exists():
+                    return Response({"phone": ["This phone number is already used by another account"]}, status=status.HTTP_400_BAD_REQUEST)
+                user.phone = new_phone
+            else:
+                user.phone = None
 
         if "email" in data and data["email"]:
             new_email = data.get("email").strip().lower()
@@ -423,6 +425,7 @@ class UpdateProfileView(APIView):
                 if value not in [None, '', 'null', 'undefined']:
                     mapped_data[field] = value.strip() if isinstance(value, str) else value
 
+   
         if "gender" in data:
             g = data.get("gender")
             if g == "Female":
@@ -432,8 +435,13 @@ class UpdateProfileView(APIView):
             elif g == "Other":
                 mapped_data["gender"] = "Other"
 
-        if "phone" in data and data.get("phone"):
-            mapped_data["phone_number"] = data.get("phone")
+       
+        if "phone" in data:
+            phone_val = data.get("phone")
+            if phone_val not in [None, '', 'null', 'undefined']:
+                mapped_data["phone_number"] = phone_val.strip()
+            else:
+                mapped_data["phone_number"] = None
 
         if 'profile_picture' in request.FILES:
             mapped_data['profile_picture'] = request.FILES['profile_picture']
@@ -456,17 +464,21 @@ class UpdateProfileView(APIView):
                 profile.current_step = 5
                 profile.save()
 
+            
             updated_profile = ProfileSerializer(profile, context={'request': request}).data
             updated_profile["email"] = user.email
-            updated_profile["phone"] = user.phone if user.phone else ""
-            return Response({"message": "Profile updated successfully", "profile": updated_profile}, status=status.HTTP_200_OK)
+            updated_profile["phone"] = user.phone if user.phone else (profile.phone_number if profile.phone_number else "")
+            
+            return Response({
+                "message": "Profile updated successfully", 
+                "profile": updated_profile
+            }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            import traceback
             print("=== UPDATE PROFILE ERROR ===")
             print(traceback.format_exc())
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+        
 # ==================== BLOCK USER ====================
 
 class BlockUserView(APIView):
@@ -478,7 +490,7 @@ class BlockUserView(APIView):
             serializer = BlockedUserSerializer(blocked, many=True, context={'request': request})
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
-            print(traceback.format_exc()) # Terminal-il full error kaanum
+            print(traceback.format_exc()) 
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def post(self, request):
@@ -534,12 +546,12 @@ class NotificationSettingView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        setting, created = NotificationSetting.objects.get_or_create(user=request.user)
+        setting, created = NotificationSettings.objects.get_or_create(user=request.user)
         serializer = NotificationSettingSerializer(setting)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def put(self, request):
-        setting, created = NotificationSetting.objects.get_or_create(user=request.user)
+        setting, created = NotificationSettings.objects.get_or_create(user=request.user)
         serializer = NotificationSettingSerializer(setting, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
@@ -553,10 +565,9 @@ class UserSubscriptionView(APIView):
 
     def get(self, request):
         try:
-            # ✅ FIX: Check expiry and deactivate if expired
-            sub = UserSubscription.objects.select_related('plan', 'user').get(user=request.user)
             
-            # Auto deactivate if expired
+            sub = UserSubscription.objects.select_related('plan', 'user').get(user=request.user)
+          
             if sub.expires_at and sub.expires_at < timezone.now():
                 sub.deactivate()
             
@@ -578,11 +589,9 @@ class UserSubscriptionView(APIView):
             })
 
     def delete(self, request):
-        """✅ Cancel Subscription"""
         try:
             sub = UserSubscription.objects.get(user=request.user)
             sub.deactivate()
-            # Reset to free plan
             sub.plan = None
             sub.plan_name = "Free Plan"
             sub.price = 0
@@ -599,10 +608,11 @@ class AdminSuccessStoryListCreateView(generics.ListCreateAPIView):
     queryset = SuccessStory.objects.all().order_by('-created_at')
     serializer_class = SuccessStorySerializer
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser] 
 
 class AdminSuccessStoryDetailView(APIView):
     permission_classes = [IsAuthenticated, IsAdminUser]
-    parser_classes = [MultiPartParser, FormParser] 
+    parser_classes = [MultiPartParser, FormParser]
 
     def put(self, request, pk):
         try:
@@ -610,22 +620,18 @@ class AdminSuccessStoryDetailView(APIView):
         except SuccessStory.DoesNotExist:
             return Response({"error": "Success story not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = SuccessStorySerializer(story, data=request.data, partial=True)
-        
+        print("FILES:", request.FILES)  
+        print("DATA:", request.data) 
+
+        serializer = SuccessStorySerializer(story, data=request.data, partial=True, context={'request': request})
+
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
-        
+
+        print("ERRORS:", serializer.errors) # ✅ Debug
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    def delete(self, request, pk):
-        try:
-            story = SuccessStory.objects.get(pk=pk)
-            story.delete()
-            return Response({"message": "Story deleted successfully"}, status=status.HTTP_200_OK)
-        except SuccessStory.DoesNotExist:
-            return Response({"error": "Story not found"}, status=status.HTTP_404_NOT_FOUND)
-
+        
 # --- Subscription Plan Views ---
 class AdminSubscriptionPlanListCreateView(generics.ListCreateAPIView):
     queryset = SubscriptionPlan.objects.all().order_by('price')
@@ -647,8 +653,6 @@ class AdminSubscriptionPlanDetailView(APIView):
             return Response({"error": "Subscription plan not found"}, status=status.HTTP_404_NOT_FOUND)
 
         data = request.data.copy()
-        # price ₹ remove cheyyunnathu serializer-il thanne handle cheyyum
-
         serializer = SubscriptionPlanSerializer(plan, data=data, partial=True)
         if serializer.is_valid():
             serializer.save()
@@ -730,7 +734,6 @@ class LikeProfileView(APIView):
                         message=f"{request.user.profile.full_name or request.user.username} liked your profile",
                         profile_id=request.user.profile.id
                     )
-
             return Response({"message": "liked", "created": created})
         except Profile.DoesNotExist:
             return Response({"error": "Profile not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -782,7 +785,6 @@ class RemoveFavouriteView(APIView):
 
 class MyLikesView(APIView):
     permission_classes = [IsAuthenticated]
-
     def get(self, request):
         likes = ProfileLike.objects.filter(from_user=request.user)
         profile_ids = likes.values_list("to_profile_id", flat=True)
@@ -832,7 +834,6 @@ def add_comment(request):
             user=request.user,
             text=text
         )
-
         Notification.objects.create(
             recipient=profile.user,
             sender=request.user,
@@ -840,7 +841,6 @@ def add_comment(request):
             message=f"{request.user.profile.full_name or request.user.username} commented on your profile",
             profile_id=profile_id
         )
-
         return Response(CommentSerializer(comment).data)
     except Profile.DoesNotExist:
         return Response({'error': 'Profile not found'}, status=404)
@@ -848,8 +848,7 @@ def add_comment(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_notifications(request):
-    notifications = Notification.objects.filter(recipient=request.user)
-    
+    notifications = Notification.objects.filter(recipient=request.user)  
     try:
         settings = NotificationSettings.objects.get(user=request.user)
         filtered_notifications = []
@@ -885,21 +884,20 @@ def mark_notification_read(request, notification_id):
     return Response({'error': 'Notification not found'}, status=404)
 
 
-class NotificationSettingsView(APIView): 
-    permission_classes = [IsAuthenticated]
+class NotificationSettingsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        settings, created = NotificationSettings.objects.get_or_create(user=request.user)
-        serializer = NotificationSettingsSerializer(settings)
-        return Response(serializer.data)
+        setting, created = NotificationSettings.objects.get_or_create(user=request.user)
+        serializer = NotificationSettingsSerializer(setting)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     def put(self, request):
-        settings, created = NotificationSettings.objects.get_or_create(user=request.user)
-        serializer = NotificationSettingsSerializer(settings, data=request.data, partial=True)
-        
+        setting, created = NotificationSettings.objects.get_or_create(user=request.user)
+        serializer = NotificationSettingsSerializer(setting, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(serializer.data, status=status.HTTP_200_OK) # saved data thirichu ayakkam
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['GET'])
@@ -1429,67 +1427,30 @@ class AdminProfilesView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def get(self, request):
-        
-        pass
-
-    def put(self, request):
-        user = request.user
-        admin_profile, created = AdminProfile.objects.get_or_create(user=user)
-
-        data = request.data.copy()
-
-     
-        if 'gender' in data:
-            gender_val = data.get('gender')
-            if gender_val:
-              
-                gender_val = re.sub(r"['\"]+", "", str(gender_val)).strip().title()
-                if gender_val in ['Male', 'Female']:
-                    data['gender'] = gender_val
-                else:
-                    data['gender'] = None
-            else:
-                data['gender'] = None
-
-        if 'date_of_birth' in data:
-            dob_val = data.get('date_of_birth')
-            if dob_val:
-                dob_val = re.sub(r"['\"]+", "", str(dob_val)).strip()
-                if dob_val in ['', 'null', 'None', 'undefined']:
-                    data['date_of_birth'] = None
-                else:
-                    data['date_of_birth'] = dob_val
-
-        if 'phone' in data:
-            phone_val = data.get('phone')
-            if phone_val:
-                phone_val = re.sub(r"['\"]+", "", str(phone_val)).strip()
-                if phone_val in ['', 'null', 'None', 'undefined']:
-                    data['phone'] = None
-                else:
-                    data['phone'] = phone_val
-
-        print("--- ക്ലീൻ ചെയ്തതിനു ശേഷമുള്ള ഡാറ്റ --- :", dict(data))
-
-        serializer = AdminProfileDetailSerializer(
-            admin_profile,
-            data=data,
-            partial=True,
-            context={'request': request}
-        )
-
-        if serializer.is_valid():
-            instance = serializer.save()
-            instance.refresh_from_db()
-            response_serializer = AdminProfileDetailSerializer(instance, context={'request': request})
-            return Response({
-                "message": "Profile updated successfully",
-                "profile": response_serializer.data
-            }, status=status.HTTP_200_OK)
-
-        print("!!! Django Serializer Errors !!! ->", serializer.errors)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+        try:
+            # 1. ഫ്രണ്ട്-എൻഡിൽ നിന്നുള്ള ഫിൽട്ടർ പാരാമീറ്ററുകൾ എടുക്കുന്നു
+            status_param = request.query_params.get('status', None)
+            religion_param = request.query_params.get('religion', None)
+            
+            # 2. എല്ലാ പ്രൊഫൈലുകളും എടുക്കുന്നു (جديد ആദ്യം വരാൻ -id നൽകാം)
+            profiles = Profile.objects.all().order_by('-id')
+            
+            # 3. സുരക്ഷിതമായി ഫിൽട്ടർ ചെയ്യുന്നു (ബ്ലാങ്ക് വാല്യൂസ് ഒഴിവാക്കാൻ)
+            if status_param and status_param.strip() != "":
+                profiles = profiles.filter(status__iexact=status_param.strip())
+                
+            if religion_param and religion_param.strip() != "":
+                profiles = profiles.filter(religion__iexact=religion_param.strip())
+                
+            # 4. സീരിയലൈസർ വഴി ഡാറ്റ ഫ്രണ്ട്-എൻഡിലേക്ക് അയക്കുന്നു
+            serializer = ProfileSerializer(profiles, many=True, context={'request': request})
+            return Response(serializer.data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            # എറർ എന്താണെന്ന് ടെർമിനലിൽ പ്രിന്റ് ചെയ്ത് കാണാൻ
+            print("Django AdminProfilesView Get Error:", str(e))
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    
 class AdminDashboardStatsView(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAdminUser]
@@ -1580,7 +1541,6 @@ class AdminDashboardStatsView(APIView):
             admin_rooms = ChatRoom.objects.filter(
                 Q(user1=request.user) | Q(user2=request.user)
             )
-
             admin_messages = Message.objects.filter(
                 room__in=admin_rooms
             ).exclude(
@@ -1590,7 +1550,6 @@ class AdminDashboardStatsView(APIView):
             for msg in admin_messages:
                 sender_prof = getattr(msg.sender, 'profile', None)
                 msg_img = get_full_image_url(sender_prof)
-
                 msg_text = msg.text or ""
                 msg_type = 'normal'
                 if msg_text.startswith('⚠️ [REPORT'):
@@ -1599,7 +1558,6 @@ class AdminDashboardStatsView(APIView):
                     msg_type = 'support'
                 elif msg_text.startswith('📞 [CONTACT'):
                     msg_type = 'contact'
-
                 display_text = msg_text[:100] if msg_text else "Sent a message"
 
                 recent_messages_list.append({
@@ -1614,7 +1572,7 @@ class AdminDashboardStatsView(APIView):
         except Exception as msg_err:
             print("Error in recent messages logic:", str(msg_err))
 
-        # 5. REVENUE CALCULATION - ✅ FIXED: 'Success' OR 'completed'
+        # 5. REVENUE CALCULATION 
         try:
             revenue_data = Payment.objects.filter(
                 Q(status='Success') | Q(status='completed')
@@ -1622,8 +1580,7 @@ class AdminDashboardStatsView(APIView):
             total_revenue = revenue_data['amount__sum'] if revenue_data['amount__sum'] else 0
         except Exception as rev_err:
             print("Error in revenue logic:", str(rev_err))
-            
-        # 6. USER GROWTH (WEEKLY CUMULATIVE - LAST 30 DAYS)
+
         user_growth_labels = []
         user_growth_data = []
 
@@ -1661,7 +1618,7 @@ class AdminDashboardStatsView(APIView):
             'recent_matches': recent_matches_list[:5],
             'recent_messages': recent_messages_list,
             'success_stories': success_stories_list,
-            'revenue': int(total_revenue), # ✅ Integer ആക്കി
+            'revenue': int(total_revenue), 
             'user_growth_labels': user_growth_labels,
             'user_growth_data': user_growth_data,
         }
@@ -1834,7 +1791,6 @@ class MyMatchesView(APIView):
                     today = date.today()
                     age = today.year - other_profile.date_of_birth.year - ((today.month, today.day) < (other_profile.date_of_birth.month, other_profile.date_of_birth.day))
 
-                # ✅ getattr use ചെയ്ത് safe ആക്കുക
                 data.append({
                     "id": other_profile.id,
                     "user_id": other_profile.user.id,
@@ -1848,8 +1804,8 @@ class MyMatchesView(APIView):
                     "profile_picture": request.build_absolute_uri(
                         other_profile.profile_picture.url
                     ) if other_profile.profile_picture else None,
-                    "is_verified": getattr(other_profile, 'is_verified', False), # ✅ Default False
-                    "is_premium": getattr(other_profile, 'is_premium', False), # ✅ Default False
+                    "is_verified": getattr(other_profile, 'is_verified', False), 
+                    "is_premium": getattr(other_profile, 'is_premium', False), 
                 })
 
         return Response(data)
@@ -1890,7 +1846,7 @@ class PublicProfileListView(APIView):
 
 
 class AdminProfileView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminUser]
+    permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
 
     def get(self, request):
@@ -1902,20 +1858,18 @@ class AdminProfileView(APIView):
                 'role': 'Super Admin' if user.is_superuser else 'Admin'
             }
         )
-        serializer = AdminProfileSerializer(admin_profile, context={'request': request})
+        serializer = AdminProfileDetailSerializer(admin_profile, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def put(self, request):
         user = request.user
         admin_profile, created = AdminProfile.objects.get_or_create(user=user)
-
         data = request.data.copy()
 
-        # ✅ എക്സാക്റ്റ് ഫിക്സ്: റിയാക്റ്റിൽ നിന്നും വരുന്ന കൊട്ടേഷൻ ചിഹ്നങ്ങൾ ഇവിടെ വെച്ച് തന്നെ കളയുന്നു
+        # Gender validation & cleaning
         if 'gender' in data:
             gender_val = data.get('gender')
             if gender_val:
-                # സ്ട്രിങ് ആക്കി മാറ്റി ഇരുവശത്തുമുള്ള കൊട്ടേഷനുകൾ (", ') കളയുന്നു
                 gender_val = str(gender_val).strip().replace('"', '').replace("'", "").title()
                 if gender_val in ['Male', 'Female']:
                     data['gender'] = gender_val
@@ -1924,6 +1878,7 @@ class AdminProfileView(APIView):
             else:
                 data['gender'] = None
 
+        # Cleaning Nullable fields
         if 'date_of_birth' in data:
             dob_val = str(data.get('date_of_birth')).strip().replace('"', '').replace("'", "")
             if dob_val in ['', 'null', 'None', 'undefined']:
@@ -1933,8 +1888,6 @@ class AdminProfileView(APIView):
             phone_val = str(data.get('phone')).strip().replace('"', '').replace("'", "")
             if phone_val in ['', 'null', 'None', 'undefined']:
                 data['phone'] = None
-
-        print("Data before serializer:", dict(data)) # ടെർമിനലിൽ ചെക്ക് ചെയ്യാൻ
 
         serializer = AdminProfileDetailSerializer(
             admin_profile,
@@ -1952,10 +1905,33 @@ class AdminProfileView(APIView):
                 "profile": response_serializer.data
             }, status=status.HTTP_200_OK)
 
-        print("!!! Django Serializer Errors !!! ->", serializer.errors)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ==================== 2. CHANGE PASSWORD VIEW (PUT METHOD) ====================
+@api_view(["PUT"]) # 🔄 405 എറർ വരാതിരിക്കാൻ PUT മെത്തേഡ് കൃത്യമായി സെറ്റ് ചെയ്തു
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    user = request.user
+    # ഫ്രണ്ട് എൻഡിൽ നിന്ന് വരാവുന്ന 'old_password' അല്ലെങ്കിൽ 'current_password' ചെക്ക് ചെയ്യുന്നു
+    old_password = request.data.get("old_password") or request.data.get("current_password")
+    new_password = request.data.get("new_password")
+
+    if not old_password or not new_password:
+        return Response({"error": "Both current password and new password are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # നിലവിലെ പാസ്‌വേഡ് ശരിയാണോ എന്ന് പരിശോധിക്കുന്നു
+    if not user.check_password(old_password):
+        return Response({"error": "Incorrect current password."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # പുതിയ പാസ്‌വേഡ് സെറ്റ് ചെയ്യുന്നു
+    user.set_password(new_password)
+    user.save()
     
-    
+    return Response({"message": "Password changed successfully."}, status=status.HTTP_200_OK)
+
+
+# ==================== 3. GET ADMIN USER ====================
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_admin_user(request):
@@ -1963,44 +1939,12 @@ def get_admin_user(request):
     if not admin:
         return Response({"error": "Admin not found"}, status=404)
     return Response({"id": admin.id, "username": admin.username})
-    
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def get_admin_profile(request):
-    try:
-        # ✅ ഇവിടെ ശരിയായ സീരിയലൈസർ ആയ AdminProfileSerializer തന്നെയാണ് കണക്ട് ചെയ്തിരിക്കുന്നത്
-        admin_profile = AdminProfile.objects.select_related('user').get(user=request.user)
-    except AdminProfile.DoesNotExist:
-        return Response({"error": "Admin profile not found"}, status=404)
-
-    serializer = AdminProfileSerializer(admin_profile, context={'request': request})
-    return Response(serializer.data)
-
-@api_view(["PUT", "PATCH"])
-@permission_classes([IsAuthenticated])
-def update_admin_profile(request):
-    try:
-        admin_profile = AdminProfile.objects.get(user=request.user)
-    except AdminProfile.DoesNotExist:
-        return Response({"error": "Admin profile not found"}, status=404)
-
-    serializer = AdminProfileSerializer(
-        admin_profile,
-        data=request.data,
-        partial=True,
-        context={'request': request}
-    )
-
-    if serializer.is_valid():
-        serializer.save()
-        return Response(serializer.data)
-    return Response(serializer.errors, status=400)
 
 # --- Success Stories Views ---
 class AdminSuccessStoryListCreateView(generics.ListCreateAPIView):
     queryset = SuccessStory.objects.all().order_by('-created_at')
     serializer_class = SuccessStorySerializer
-    permission_classes = [IsAuthenticated] # അഡ്മിൻ ആക്കാൻ [IsAdminUser] നൽകാം
+    permission_classes = [IsAuthenticated]
 
 class AdminSuccessStoryDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = SuccessStory.objects.all()
@@ -2030,8 +1974,6 @@ class AdminSubscriptionPlanView(APIView):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
-
 # --- Payments View ---
 class AdminPaymentListView(generics.ListAPIView):
     queryset = Payment.objects.all().order_by('-created_at') 
@@ -2042,18 +1984,13 @@ class AdminPaymentListView(generics.ListAPIView):
     ordering_fields = ['created_at', 'amount']
     
 
-
-
 class AdminUserGrowthView(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        # Last 30 days data
         end_date = datetime.now().date()
         start_date = end_date - timedelta(days=29)
-        
-        # Group by date
         users_by_date = User.objects.filter(
             date_joined__date__range=[start_date, end_date]
         ).annotate(
@@ -2084,7 +2021,7 @@ class CreateRazorpayOrderView(APIView):
         plan_id = request.data.get('plan_id')
         try:
             plan = SubscriptionPlan.objects.get(id=plan_id)
-            amount = int(plan.price * 100) # ₹299 = 29900 paise
+            amount = int(plan.price * 100) 
 
             razorpay_order = razorpay_client.order.create({
                 "amount": amount,
@@ -2129,11 +2066,7 @@ class VerifyPaymentView(APIView):
                 'razorpay_signature': razorpay_signature
             }
             client.utility.verify_payment_signature(params_dict)
-
-            # 2. Get Plan
             plan = SubscriptionPlan.objects.get(id=plan_id)
-
-            # 3. ✅ CRITICAL FIX: Deactivate existing active subscription
             existing_sub = UserSubscription.objects.filter(
                 user=request.user,
                 is_active=True
@@ -2141,14 +2074,11 @@ class VerifyPaymentView(APIView):
 
             if existing_sub:
                 existing_sub.is_active = False
-                existing_sub.cancelled_at = timezone.now() # ✅ Cancel time save ചെയ്യുക
+                existing_sub.cancelled_at = timezone.now() 
                 existing_sub.save()
-
-            # 4. Create or Update subscription
             sub, created = UserSubscription.objects.get_or_create(user=request.user)
-            sub.activate(plan) # This sets plan, is_active=True, dates
+            sub.activate(plan) 
 
-            # 5. Save Payment Record
             Payment.objects.create(
                 user=request.user,
                 user_name=request.user.username,
@@ -2158,7 +2088,6 @@ class VerifyPaymentView(APIView):
                 razorpay_order_id=razorpay_order_id,
                 status="completed"
             )
-
             return Response({
                 "message": "Payment verified and Plan activated!",
                 "plan_name": plan.name,
@@ -2174,9 +2103,7 @@ class VerifyPaymentView(APIView):
             return Response({"error": str(e)}, status=400)
 
 
-
 def get_is_verified(self, obj):
-    """✅ Payment success OR Premium active"""
     has_payment = Payment.objects.filter(
         user=obj.user,
         status__in=['completed', 'success']
@@ -2189,8 +2116,6 @@ def get_is_verified(self, obj):
             premium_active = sub.is_active and sub.expires_at and sub.expires_at > timezone.now()
     except:
         pass
-    
-    # OR condition - ഒരെണ്ണം true ആയാൽ verified
     return has_payment or premium_active
 
 
@@ -2202,9 +2127,9 @@ def get_public_plans(request):
         serializer = SubscriptionPlanSerializer(plans, many=True)
         return Response(serializer.data)
     except Exception as e:
-        print(f"Plans API Error: {str(e)}") # ✅ Terminal-ൽ error കാണാം
+        print(f"Plans API Error: {str(e)}")
         import traceback
-        traceback.print_exc() # ✅ Full traceback print ചെയ്യും
+        traceback.print_exc() 
         return Response({'error': str(e)}, status=500)
 
 @api_view(['GET'])

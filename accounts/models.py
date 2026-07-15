@@ -145,8 +145,18 @@ class Advertisement(models.Model):
     file = models.FileField(upload_to='ads/')
     file_type = models.CharField(max_length=10, choices=FILE_TYPE_CHOICES, default='image')
     link_url = models.URLField(blank=True, null=True)
-    is_active = models.BooleanField(default=True) # ✅ default=True ensure cheyyuka
+    is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if self.file:
+            # file name vechu type kandu pidikkuka
+            file_name = self.file.name.lower()
+            if file_name.endswith(('.mp4', '.mov', '.avi', '.mkv', '.webm')):
+                self.file_type = 'video'
+            else:
+                self.file_type = 'image'
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.title if self.title else f"Ad {self.id} ({self.file_type})"
@@ -214,30 +224,19 @@ class SupportMessage(models.Model):
     def __str__(self):
         return f"{self.subject} by {self.user.username}"
 # 🔔 1. Notification Settings Model
-class NotificationSetting(models.Model):
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='notification_setting')
-    messages = models.BooleanField(default=True)
-    matches = models.BooleanField(default=True)
-    profile_views = models.BooleanField(default=True)
-    likes = models.BooleanField(default=True)
-    updates = models.BooleanField(default=False)
-    email_notifications = models.BooleanField(default=True)
-
-    def __str__(self):
-        return f"Notification settings for {self.user.username}"
-    
 class NotificationSettings(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='notification_settings')
     messages = models.BooleanField(default=True)
-    favourites = models.BooleanField(default=True)
+    favourites = models.BooleanField(default=True) # matches -> favourites aakki
     profile_views = models.BooleanField(default=True)
     likes = models.BooleanField(default=True)
-    updates_news = models.BooleanField(default=False)
+    updates_news = models.BooleanField(default=False) # updates -> updates_news aakki
     email_notifications = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"{self.user.username} - Notification Settings"
+    
 class SubscriptionPlan(models.Model):
     name = models.CharField(max_length=100)
     price = models.IntegerField(default=0)
@@ -421,26 +420,8 @@ class Message(models.Model):
         ordering = ['created_at']
         
 
-# 1. Admin Settings Model
-class AdminSettings(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='admin_settings')
-    profile_image = models.ImageField(upload_to='admin_profiles/', null=True, blank=True)
-    full_name = models.CharField(max_length=255, blank=True)
-    phone_number = models.CharField(max_length=15, blank=True, null=True)
-    date_of_birth = models.DateField(null=True, blank=True)
-    gender = models.CharField(max_length=10, choices=[('male', 'Male'), ('female', 'Female')], null=True, blank=True)
-    location = models.CharField(max_length=255, blank=True, null=True)
-    language = models.CharField(max_length=20, default='english', choices=[
-        ('english', 'English'),
-        ('malayalam', 'Malayalam'),
-        ('hindi', 'Hindi')
-    ])
-    bio = models.TextField(blank=True, null=True)
-    role = models.CharField(max_length=50, default='Admin') # ✅ Ithu add cheyyu
-    updated_at = models.DateTimeField(auto_now=True)
 
-    def __str__(self):
-        return f"{self.full_name} - Admin"
+
 
 class AadhaarVerification(models.Model):
     STATUS_CHOICES = [
@@ -470,15 +451,15 @@ class AdminProfile(models.Model):
     phone = models.CharField(max_length=15, blank=True, null=True)
     role = models.CharField(max_length=50, default='Admin')
     date_of_birth = models.DateField(null=True, blank=True)
-    gender = models.CharField(max_length=10, choices=[('Male', 'Male'), ('Female', 'Female')], blank=True, null=True)
+    gender = models.CharField(max_length=15, choices=[('Male', 'Male'), ('Female', 'Female')], blank=True, null=True)
     location = models.CharField(max_length=255, blank=True, null=True)
     language = models.CharField(max_length=50, default='English')
     bio = models.TextField(blank=True, null=True)
-    profile_picture = models.ImageField(upload_to='admin_profiles/', null=True, blank=True)
+    profile_image = models.ImageField(upload_to='admin_profiles/', null=True, blank=True) # ✅ ഫ്രണ്ട് എൻഡുമായി മാച്ച് ചെയ്യാൻ
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    def __str__(self):
+    def _str_(self):
         return f"{self.user.email} - Admin Profile"
 
 
