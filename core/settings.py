@@ -43,17 +43,18 @@ DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=config('EMAIL_HOST_USE
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
 
 # 4. CORS Settings
+# 💡 എളുപ്പത്തിൽ കണക്ഷൻ കിട്ടാൻ താൽക്കാലികമായി ALLOW_ALL നൽകാം, അല്ലെങ്കിൽ ALLOWED_ORIGINS ഉപയോഗിക്കാം
+CORS_ALLOW_ALL_ORIGINS = True  
+CORS_ALLOW_CREDENTIALS = True
+
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:3000",
     "https://zinda-connect-frontend.vercel.app",
     "https://zindaconnect.com",
     "https://www.zindaconnect.com",
-    "https://zinda-connect-frontend.vercel.app",  
     FRONTEND_URL,
 ]
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_ALL_ORIGINS = False  
 
 CORS_ALLOW_HEADERS = [
     "authorization", "content-type", "accept", "origin", "x-csrftoken", "x-requested-with",
@@ -68,16 +69,17 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     # Third party
+    'corsheaders', # 💡 മികച്ച ഓർഡറിനായി ഇത് മുകളിൽ നൽകുന്നു
     'rest_framework',
     'rest_framework_simplejwt',
-    'corsheaders',
     'drf_yasg',
 ]
 
+# 💡 MIDDLEWARE ഓർഡർ തിരുത്തിയിട്ടുണ്ട് (CorsMiddleware-ന്റെ സ്ഥാനം ശ്രദ്ധിക്കുക)
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware', # 👈 ഏറ്റവും മുകളിൽ നൽകണം
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware', 
-    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -171,6 +173,7 @@ USE_TZ = True
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # 9. SECURITY HEADERS 
-SECURE_SSL_REDIRECT = True
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+
+SECURE_SSL_REDIRECT = False 
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
